@@ -68,3 +68,12 @@ def test_split_rejects_empty_text():
 def test_split_rejects_an_unclosed_fence():
     with pytest.raises(ValueError, match="closed"):
         frontmatter.split_frontmatter("---\nname: demo\nbody but no closing fence\n")
+
+
+def test_split_strips_leading_utf8_bom_before_opening_fence():
+    text = "\ufeff---\nname: arabic-skill\ndescription: دعم العربية\n---\nمحتوى المهارة.\n"
+
+    yaml_block, body = frontmatter.split_frontmatter(text)
+
+    assert yaml_block == "name: arabic-skill\ndescription: دعم العربية"
+    assert body == "محتوى المهارة."

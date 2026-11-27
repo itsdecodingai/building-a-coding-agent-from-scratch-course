@@ -279,13 +279,28 @@ def _estimate_tokens(message: ModelMessage) -> int:
     return chars // _CHARS_PER_TOKEN
 
 
+def _text_char_units(text: str) -> int:
+    """UTF-8-weighted character units so non-ASCII scripts do not undercount tokens by ~3x.
+
+    Pure ASCII has ``utf8_len == char_len`` and returns ``len(text)`` verbatim (1 unit/char →
+    ``chars // 4``). Multi-byte scripts (Arabic/Hebrew/Cyrillic = 2 UTF-8 bytes → 3 units/char ≈
+    0.75 tok/char; CJK = 3 UTF-8 bytes → 5 units/char ≈ 1.25 tok/char) track Byte-BPE fertility
+    instead of overflowing ``keep_recent_tokens``.
+    """
+    utf8_len = len(text.encode("utf-8"))
+    char_len = len(text)
+    if utf8_len == char_len:
+        return char_len
+    return 2 * utf8_len - char_len
+
+
 def _part_chars(part: object) -> int:
     content = getattr(part, "content", None)
     if content is not None:
-        return len(content) if isinstance(content, str) else len(str(content))
+        return _text_char_units(content if isinstance(content, str) else str(content))
     args = getattr(part, "args", None)
     if args is not None:
-        return len(args) if isinstance(args, str) else len(str(args))
+        return _text_char_units(args if isinstance(args, str) else str(args))
     return 0
 
 

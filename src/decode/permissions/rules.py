@@ -12,6 +12,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import logging
+import posixpath
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -21,16 +22,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# The JSON args field carrying each tool's subject; unlisted tools fall back to the tool name.
-_SUBJECT_FIELD: dict[str, str] = {
-    "bash": "command",
-    "read": "path",
-    "write": "path",
-    "edit": "path",
-    "glob": "path",
-    "grep": "path",
-    "web_fetch": "url",
+# Ordered JSON args fields carrying each tool's subject; unlisted tools fall back to the tool name.
+# ``glob`` takes ``pattern`` in production (with ``path`` kept as a compatibility fallback), and
+# ``grep`` scopes by ``path`` when given or ``glob`` otherwise.
+_SUBJECT_FIELDS: dict[str, tuple[str, ...]] = {
+    "bash": ("command",),
+    "read": ("path",),
+    "write": ("path",),
+    "edit": ("path",),
+    "glob": ("pattern", "path"),
+    "grep": ("path", "glob"),
+    "web_fetch": ("url",),
 }
+
+# File-scoped tools whose subject paths must be POSIX-normalized before glob matching so relative
+# aliases like ``./.env`` or ``sub/../.env`` cannot bypass ``deny`` rules such as ``read(.env)``.
+_PATH_NORMALIZED_TOOLS: frozenset[str] = frozenset({"read", "write", "edit", "glob", "grep"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,18 +87,34 @@ def parse_rule(text: str) -> Rule:
     return Rule(tool_name=tool_name, pattern=pattern)
 
 
+def _normalize_path_subject(raw: str) -> str:
+    """Canonicalize redundant POSIX dot/slash segments without touching glob wildcards."""
+    slashed = raw.strip().replace("\\", "/")
+    if not slashed:
+        return ""
+    normalized = posixpath.normpath(slashed)
+    return normalized
+
+
 def subject_for(tool_name: str, args_json: str) -> str:
     """Extract the per-kind subject a rule globs against; falls back to the tool name. Never raises."""
-    field_name = _SUBJECT_FIELD.get(tool_name)
-    if field_name is None:
+    field_names = _SUBJECT_FIELDS.get(tool_name)
+    if field_names is None:
         return tool_name
     try:
         args = json.loads(args_json)
     except (json.JSONDecodeError, TypeError):
         return tool_name
-    value = args.get(field_name) if isinstance(args, dict) else None
-    if isinstance(value, str) and value:
-        return value
+    if not isinstance(args, dict):
+        return tool_name
+    for field_name in field_names:
+        value = args.get(field_name)
+        if isinstance(value, str) and value.strip():
+            if tool_name in _PATH_NORMALIZED_TOOLS:
+                normalized = _normalize_path_subject(value)
+                if normalized:
+                    return normalized
+            return value
     return tool_name
 
 
