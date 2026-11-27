@@ -466,6 +466,16 @@ def test_estimate_history_tokens_sums_chars_over_four():
     assert estimate_history_tokens(messages) == 16
 
 
+def test_estimate_history_tokens_weights_multibyte_arabic_and_cjk_scripts():
+    # 40 Arabic codepoints = 80 UTF-8 bytes → 2*80 - 40 = 120 units → 30 tokens (~0.75 tok/char)
+    # instead of 40 // 4 == 10 tokens (3x undercount that overflows keep_recent_tokens).
+    arabic_messages: list[ModelMessage] = [_user("م" * 40)]
+    cjk_messages: list[ModelMessage] = [_user("中" * 40)]
+
+    assert estimate_history_tokens(arabic_messages) == 30
+    assert estimate_history_tokens(cjk_messages) == 50
+
+
 def test_estimate_history_tokens_shares_the_tail_estimator():
     # Single source of truth: the public sum is exactly the per-message _estimate_tokens split_tail
     # sizes the tail with (one divisor, _CHARS_PER_TOKEN) — never a second, divergent estimator.

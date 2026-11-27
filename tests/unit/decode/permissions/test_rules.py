@@ -285,3 +285,36 @@ def test_rule_set_first_matching_deny():
 
     assert rule_set.matching_deny(_request("bash", "rm -rf x")) is not None
     assert rule_set.matching_deny(_request("bash", "ls")) is None
+
+
+# relative path canonicalization & glob/grep subject fields
+
+
+@pytest.mark.parametrize(
+    ("raw_path", "expected"),
+    [
+        ("./.env", ".env"),
+        ("sub/../.env", ".env"),
+        ("secrets//api.key", "secrets/api.key"),
+        ("./secrets/prod.env", "secrets/prod.env"),
+    ],
+)
+def test_subject_for_normalizes_relative_file_paths_against_deny_bypass(raw_path, expected):
+    subject = rules.subject_for("read", json.dumps({"path": raw_path}))
+    deny_rule = rules.parse_rule("read(.env)")
+
+    assert subject == expected
+    if expected == ".env":
+        assert rules.matches(deny_rule, _request("read", subject)) is True
+
+
+def test_subject_for_glob_reads_pattern_arg():
+    subject = rules.subject_for("glob", '{"pattern": "./**/.env*"}')
+
+    assert subject == "**/.env*"
+
+
+def test_subject_for_grep_falls_back_to_glob_when_path_is_absent():
+    subject = rules.subject_for("grep", '{"pattern": "API_KEY", "glob": "./.env*"}')
+
+    assert subject == ".env*"
